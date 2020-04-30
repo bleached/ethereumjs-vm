@@ -3,6 +3,7 @@ const BN = require('bn.js')
 const Stack = require('../../../dist/evm/stack').default
 const VM = require('../../../dist/index').default
 const PStateManager = require('../../../dist/state/promisified').default
+
 const { createAccount } = require('../utils')
 
 tape('Stack', t => {
@@ -131,11 +132,11 @@ tape('Stack', t => {
           DUP1
           DUP1
           PUSH1 0x01
-          CALLER 
+          CALLER
           DUP3
           CALL          stack: [0, CALLER, 1, 0, 0, 0, 0, 0]
           POP           pop the call result (1)
-          PUSH1 0x00      
+          PUSH1 0x00
           MSTORE        we now expect that the stack (prior to MSTORE) is [0, 0]
           PUSH1 0x20
           PUSH1 0x00
@@ -144,6 +145,7 @@ tape('Stack', t => {
     const state = new PStateManager(vm.stateManager)
     await state.putAccount(addr, account)
     await state.putContractCode(addr, Buffer.from(code, 'hex'))
+
     const runCallArgs = {
       caller: caller,
       gasLimit: new BN(0xffffffffff),
@@ -152,7 +154,7 @@ tape('Stack', t => {
     }
     try {
       const res = await vm.runCall(runCallArgs)
-      const executionReturnValue = res.execResult.returnValue 
+      const executionReturnValue = res.execResult.returnValue
       st.assert(executionReturnValue.equals(expectedReturnValue))
       st.end()
     } catch(e) {
