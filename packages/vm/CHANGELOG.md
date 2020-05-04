@@ -21,6 +21,7 @@ This is a maintenance release preceding the v5.
 
 - Properly copying BigNumbers on stack.
   PR [#733](https://github.com/ethereumjs/ethereumjs-vm/pull/733)
+
 - Fixes installation on Node 12, by bumping `level` dependency from `^4.0.0` to `^6.0.0`
   PR [#662](https://github.com/ethereumjs/ethereumjs-vm/pull/662)
 
@@ -147,7 +148,7 @@ Added EIPs:
 - [EIP-152](https://eips.ethereum.org/EIPS/eip-152): Blake 2b `F` precompile,
   PR [#584](https://github.com/ethereumjs/ethereumjs-vm/pull/584)
 - [EIP-1108](https://eips.ethereum.org/EIPS/eip-1108): Reduce `alt_bn128`
-  precompile gas costs,  
+  precompile gas costs,
   PR [#540](https://github.com/ethereumjs/ethereumjs-vm/pull/540)
   (already released in `v4.0.0`)
 - [EIP-1344](https://eips.ethereum.org/EIPS/eip-1344): Add ChainID Opcode,
