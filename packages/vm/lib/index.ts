@@ -12,8 +12,36 @@ import { EVMResult, ExecResult } from './evm/evm'
 import { OpcodeList, getOpcodesForHF } from './evm/opcodes'
 import { precompiles } from './evm/precompiles'
 import runBlockchain from './runBlockchain'
+
+import PStateManager from './state/promisified'
+import { OvmStateManager } from './ovm/ovm-state-manager'
+const promisify = require('util.promisify')
 const AsyncEventEmitter = require('async-eventemitter')
 const promisify = require('util.promisify')
+
+interface OVMContract {
+  address: Buffer
+  addressHex: string
+}
+
+interface StorageDump {
+  [key: string]: string
+}
+
+interface StateDump {
+  contracts: {
+    ovmExecutionManager: string
+    ovmStateManager: string
+  }
+  accounts: {
+    [address: string]: {
+      balance: number
+      nonce: number
+      code: string
+      storage: StorageDump
+    }
+  }
+}
 
 /**
  * Options for instantiating a [[VM]].
@@ -56,6 +84,16 @@ export interface VMOpts {
    */
   allowUnlimitedContractSize?: boolean
   common?: Common
+
+  ovmOpts?: {
+    initialized?: boolean
+    emGasLimit?: number
+    dump?: StateDump
+    contracts?: {
+      ovmExecutionManager: OVMContract
+      ovmStateManager: OVMContract
+    }
+  }
 }
 
 /**
@@ -84,6 +122,16 @@ export default class VM extends AsyncEventEmitter {
     await vm.init()
     return vm
   }
+
+  // Custom variables
+  emGasLimit: number
+  initialized: boolean
+  dump: StateDump | undefined
+  contracts: {
+    ovmExecutionManager: OVMContract
+    ovmStateManager: OVMContract
+  }
+  ovmStateManager: OvmStateManager
 
   /**
    * Instantiates a new [[VM]] Object.
@@ -137,37 +185,82 @@ export default class VM extends AsyncEventEmitter {
     this.allowUnlimitedContractSize =
       opts.allowUnlimitedContractSize === undefined ? false : opts.allowUnlimitedContractSize
 
+    // OVM option setup.
+    const ovmOpts = opts.ovmOpts || {}
+    this.emGasLimit = ovmOpts.emGasLimit || 100_000_000
+    this.dump = ovmOpts.dump
+    this.initialized = ovmOpts.initialized || false
+    this.contracts = ovmOpts.contracts || {
+      ovmExecutionManager: {
+        address: Buffer.from(''),
+        addressHex: '0x'
+      },
+      ovmStateManager: {
+        address: Buffer.from(''),
+        addressHex: '0x'
+      },
+    }
+
+    // Always need an instance of this.
+    this.ovmStateManager = new OvmStateManager({
+      vm: this
+    })
+
     // We cache this promisified function as it's called from the main execution loop, and
     // promisifying each time has a huge performance impact.
     this._emit = promisify(this.emit.bind(this))
   }
 
   async init(): Promise<void> {
-    if (this.isInitialized) {
+    if (this.initialized) {
       return
     }
 
-    const { opts } = this
-
-    if (opts.activatePrecompiles && !opts.stateManager) {
-      this.stateManager.checkpoint()
-      // put 1 wei in each of the precompiles in order to make the accounts non-empty and thus not have them deduct `callNewAccount` gas.
-      await Promise.all(
-        Object.keys(precompiles)
-          .map((k: string): Buffer => Buffer.from(k, 'hex'))
-          .map((address: Buffer) =>
-            this.stateManager.putAccount(
-              address,
-              new Account({
-                balance: '0x01',
-              }),
-            ),
-          ),
-      )
-      await this.stateManager.commit()
+    if (!this.dump) {
+      throw new Error('You must provide a state dump to initialize the OVM.')
     }
 
-    this.isInitialized = true
+    this.initialized = true
+
+    let emAddress = this.dump.contracts.ovmExecutionManager
+    if (emAddress.startsWith('0x')) {
+      emAddress = emAddress.slice(2)
+    }
+
+    let smAddress = this.dump.contracts.ovmStateManager
+    if (smAddress.startsWith('0x')) {
+      smAddress = smAddress.slice(2)
+    }
+
+    this.contracts = {
+      ovmExecutionManager: {
+        address: Buffer.from(emAddress, 'hex'),
+        addressHex: '0x' + emAddress
+      },
+      ovmStateManager: {
+        address: Buffer.from(smAddress, 'hex'),
+        addressHex: '0x' + smAddress
+      }
+    }
+
+    for (const [address, account] of Object.entries(this.dump.accounts)) {
+      await this.pStateManager.putAccount(
+        Buffer.from(address, 'hex'), new Account()
+      )
+
+      await this.pStateManager.putContractCode(
+        Buffer.from(address, 'hex'),
+        Buffer.from(account.code, 'hex')
+      )
+
+      for (const [key, val] of Object.entries(account.storage)) {
+        await this.pStateManager.putContractStorage(
+          Buffer.from(address, 'hex'),
+          Buffer.from(key, 'hex'),
+          Buffer.from(val, 'hex')
+        )
+      }
+    }
   }
 
   /**
@@ -237,6 +330,7 @@ export default class VM extends AsyncEventEmitter {
       stateManager: this.stateManager.copy(),
       blockchain: this.blockchain,
       common: this._common,
+      ovmOpts: this.opts.ovmOpts
     })
   }
 }
