@@ -1,126 +1,19 @@
-<p align="center">
-  <img src="https://user-images.githubusercontent.com/47108/78779352-d0839500-796a-11ea-9468-fd2a0b3fe1ef.png" width=280>
-</p>
+# ethereumjs-ovm
 
-# EthereumJS Monorepo
+Implements Optimism's OVM in Javascript. Forked with <3 from `ethereumjs-vm`!
 
-[![Code Coverage][coverage-badge]][coverage-link]
-[![Gitter][gitter-badge]][gitter-link]
-[![StackExchange][stackexchange-badge]][stackexchange-link]
+## Logging
 
-[![JS Standard Style][js-standard-style-badge]][js-standard-style-link]
+This fork provides some custom logging tools for introspecting the OVM via the `debug` package. Particularly, the environment variable `DEBUG='ethjs-ovm:interpreter` will allow you to log various degrees of internal EVM execution such as calls, stack, and memory.
 
-This was originally the EthereumJS VM repository. On Q1 2020 we brought some of its building blocks together to simplify development. Below you can find the packages included in this repository.
+Available namespaces are:
 
-🚧 Please note that the `master` branch is updated on a daily basis, and to inspect code related to a specific package version, refer to the [tags](https://github.com/ethereumjs/ethereumjs-vm/tags).
+- All OVM debug logging (warning, lots of logs): `DEBUG='ethjs-ovm:interpreter:*'`
+- Call logging: `DEBUG='ethjs-ovm:interpreter:calls`
+- Step logging: `DEBUG='ethjs-ovm:interpreter:calls:steps`
+- Memory logging: `DEBUG='ethjs-ovm:interpreter:calls:memory`
 
-| package                                     | npm                                                         | issues                                                                  | tests                                                                  | coverage                                                                |
-| ------------------------------------------- | ----------------------------------------------------------- | ----------------------------------------------------------------------- | ---------------------------------------------------------------------- | ----------------------------------------------------------------------- |
-| [@ethereumjs/account][account-package]       | [![NPM Package][account-npm-badge]][account-npm-link]       | [![Account Issues][account-issues-badge]][account-issues-link]          | [![Actions Status][account-actions-badge]][account-actions-link]       | [![Code Coverage][account-coverage-badge]][account-coverage-link]       |
-| [@ethereumjs/block][block-package]           | [![NPM Package][block-npm-badge]][block-npm-link]           | [![Block Issues][block-issues-badge]][block-issues-link]                | [![Actions Status][block-actions-badge]][block-actions-link]           | [![Code Coverage][block-coverage-badge]][block-coverage-link]           |
-| [@ethereumjs/blockchain][blockchain-package] | [![NPM Package][blockchain-npm-badge]][blockchain-npm-link] | [![Blockchain Issues][blockchain-issues-badge]][blockchain-issues-link] | [![Actions Status][blockchain-actions-badge]][blockchain-actions-link] | [![Code Coverage][blockchain-coverage-badge]][blockchain-coverage-link] |
-| [@ethereumjs/common][common-package]         | [![NPM Package][common-npm-badge]][common-npm-link]         | [![Common Issues][common-issues-badge]][common-issues-link]             | [![Actions Status][common-actions-badge]][common-actions-link]         | [![Code Coverage][common-coverage-badge]][common-coverage-link]         |
-| [@ethereumjs/ethash][ethash-package]         | [![NPM Package][ethash-npm-badge]][ethash-npm-link]         | [![Ethash Issues][ethash-issues-badge]][ethash-issues-link]             | [![Actions Status][ethash-actions-badge]][ethash-actions-link]         | [![Code Coverage][ethash-coverage-badge]][ethash-coverage-link]         |
-| [@ethereumjs/tx][tx-package]                 | [![NPM Package][tx-npm-badge]][tx-npm-link]                 | [![Tx Issues][tx-issues-badge]][tx-issues-link]                         | [![Actions Status][tx-actions-badge]][tx-actions-link]                 | [![Code Coverage][tx-coverage-badge]][tx-coverage-link]                 |
-| [@ethereumjs/vm][vm-package]                 | [![NPM Package][vm-npm-badge]][vm-npm-link]                 | [![VM Issues][vm-issues-badge]][vm-issues-link]                         | [![Actions Status][vm-actions-badge]][vm-actions-link]                 | [![Code Coverage][vm-coverage-badge]][vm-coverage-link]                 |
-
-## Coverage report
-
-Detailed version can be seen on [Codecov.io][coverage-link]
-
-[![Code Coverage](https://codecov.io/gh/ethereumjs/ethereumjs-vm/branch/master/graphs/icicle.svg)][coverage-link]
-
-## Package dependency relationship
-
-<p align="center">
- <img width="409" alt="diagram" src="https://user-images.githubusercontent.com/47108/84323915-b0787980-ab45-11ea-96fd-55a03ba1f3e8.png">
-</p>
-
-<!-- CREATED WITH MERMAID
-https://mermaid-js.github.io/mermaid-live-editor/#/edit/eyJjb2RlIjoiZ3JhcGggVERcbiAgdm17Vk19XG4gIGNvbW1vbiAtLT4gYmxvY2tjaGFpblxuICBjb21tb24gLS0-IGJsb2NrXG4gIGNvbW1vbiAtLT4gdm1cbiAgY29tbW9uIC0tPiB0eFxuICBldGhhc2ggLS0-IGJsb2NrY2hhaW5cbiAgYmxvY2sgLS0-IGJsb2NrY2hhaW5cbiAgYmxvY2tjaGFpbiAtLT4gdm1cbiAgYmxvY2sgLS0-IHZtXG4gIHR4IC0tPiB2bVxuICB0eCAtLT4gYmxvY2tcbiAgYWNjb3VudCAtLT4gdm1cbiAgIiwibWVybWFpZCI6eyJ0aGVtZSI6ImRlZmF1bHQifSwidXBkYXRlRWRpdG9yIjpmYWxzZX0
--->
-
-## Development quick start
-
-This monorepo uses [Lerna](https://lerna.js.org/). It links the local packages together, making development a lot easier.
-
-TLDR: Setup
-```sh
-npm install
-npm build
-```
-
-TLDR: To update dependencies and (re-)link packages
-```sh
-npm run bootstrap
-npm build
-```
-
-Above is the quickest way to set you up. Going down the road, there are two sets of commands: *project* and *package-specific* commands. You can find them at `./package.json` and `./packages/*/package.json`, respectively. Here's a breakdown:
-
-### Project scripts — run from repository root
-
-#### `npm install`
-Adds dependencies listed in the root package. Also, it executes the `bootstrap` script described below, installing all sub-packages dependencies.
-
-#### `npm run bootstrap`
-
-Installs dependencies for all sub-packages, and links them to create an integrated development environment.
-
-#### `npm run build`
-
-Produces `dist` files for all sub-packages. This command can be scoped
-
-#### `npm run build:tree -- --scope @ethereumjs/blockchain`
-
-Builds all local packages that the provided package (eg: @ethereumjs/blockchain) depends on, and itself. This unusual syntax just means: pass whatever arguments are after `--` to the underlying script. 
-
-If no scope is provided, `npm run build:tree`, will build all sub-packages.
-
-### Package scripts — run from `./packages/<name>`
-
- **⚠️ Important: if you run `npm install` from the package directory, it will remove all links to the local packages, pulling all dependencies from npm. Run `npm install` from the root only.**
- 
-There's a set of rather standardized commands you will find in each package of this repository.
-
-#### `npm run build`
-
-Uses TypeScript compiler to build files from `src` or `lib`. Files can be found at `packages/<name>/dist`.
-
-#### `npm run coverage`
-
-Runs whatever is on `npm run test` script, capturing coverage information. By the end, it displays a coverage table. Additional reports can be found at `packages/<name>/coverage`.
-
-#### `npm run docs:build`
-
-Generates package documentation and outputs it to `./packages/<name>/docs`.
-
-#### `npm run lint`
-
-Checks code style, according to the rules defined in [ethereumjs-config](https://github.com/ethereumjs/ethereumjs-config).
-
-#### `npm run lint:fix`
-
-Fixes code style, according to the rules 
-
-#### `npm run test`
-
-Runs all package tests. Note that the VM have several test scopes. Refer to their package.json for more info.
-
-### Going further
-
-As this project is powered by Lerna, you can install it globally to enjoy lots more options. Refer to [Lerna docs](https://github.com/lerna/lerna/tree/master/commands/run) for additional commands.
-
-- `npm install -g lerna`
-- `lerna run`
-- `lerna exec`
-- `lerna clean`
-
-# EthereumJS
-
-See our organizational [documentation](https://ethereumjs.readthedocs.io) for an introduction to `EthereumJS` as well as information on current standards and best practices.
-
-If you want to join for work or do improvements on the libraries have a look at our [contribution guidelines](https://ethereumjs.readthedocs.io/en/latest/contributing.html).
+Or mix and match any of the above to get your desired logging level.
 
 # LICENSE
 
