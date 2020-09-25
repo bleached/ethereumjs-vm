@@ -14,7 +14,7 @@ export enum ERROR {
   VALUE_OVERFLOW = 'value overflow',
 
   // Custom variables
-  OVM_ERROR = 'target contract not reached'
+  OVM_ERROR = 'target contract not reached',
 }
 
 export class VmError {
