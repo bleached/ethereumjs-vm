@@ -30,5 +30,4 @@
     "lint:fix": "lerna run lint:fix --stream --parallel",
     "test": "lerna exec npm run test --parallel",
     "coverage": "lerna run coverage --stream"
-  }
 }
