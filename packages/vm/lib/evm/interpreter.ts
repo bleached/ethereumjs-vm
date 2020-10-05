@@ -239,7 +239,7 @@ export default class Interpreter {
   }
 
   _logStep(step: InterpreterStep): void {
-    if (!env.DEBUG?.includes(logger.namespace)) {
+    if (!env.DEBUG?.includes(logger.namespace) && !logger.enabled) {
       return
     }
 
