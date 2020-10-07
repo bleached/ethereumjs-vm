@@ -207,7 +207,7 @@ export default class VM extends AsyncEventEmitter {
           address: fromHexString(account.address),
           addressHex: account.address,
           code: account.code,
-          iface: new Interface(account.abi)
+          iface: new Interface(account.abi),
         }
       }
     }
@@ -338,13 +338,13 @@ export default class VM extends AsyncEventEmitter {
   }
 
   getContract(address: Buffer): OVMContract | undefined {
-    return Object.values(this.contracts).find((contract) => {
+    return Object.values(this.contracts).find(contract => {
       return contract.address.equals(address)
     })
   }
 
   getContractByName(name: string): OVMContract | undefined {
-    return Object.values(this.contracts).find((contract) => {
+    return Object.values(this.contracts).find(contract => {
       return contract.name === name
     })
   }
