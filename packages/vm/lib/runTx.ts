@@ -142,10 +142,13 @@ async function _runTx(this: VM, opts: RunTxOpts): Promise<RunTxResult> {
     gasLimit: gasLimit.mul(new BN(5)), // TODO: Find a cleaner way to do this, it works for now though.
     to: tx.to.toString('hex') !== '' ? tx.to : undefined,
     value: tx.value,
-    data: tx.data,
+    data: tx.serialize(),
   })
   const evm = new EVM(this, txContext, block)
+
+  console.log('---------- BEGIN TRANSACTION TRACE ----------')
   const results = (await evm.executeMessage(message)) as RunTxResult
+  console.log('----------  END TRANSACTION TRACE  ----------')
 
   /*
    * Parse results

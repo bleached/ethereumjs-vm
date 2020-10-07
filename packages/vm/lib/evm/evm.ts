@@ -16,7 +16,9 @@ import TxContext from './txContext'
 import Message from './message'
 import EEI from './eei'
 import { default as Interpreter, InterpreterOpts, RunState } from './interpreter'
-import { fromHexString, toHexAddress } from '../ovm/utils/buffer-utils'
+import { fromHexString, toHexAddress, toHexString } from '../ovm/utils/buffer-utils'
+import { Interface } from 'ethers/lib/utils'
+import { ethers } from 'ethers'
 
 /**
  * Result of executing a message via the [[EVM]].
@@ -124,6 +126,14 @@ export default class EVM {
     await this._state.checkpoint()
 
     if (message.depth === 0) {
+      const code = await this._state.getContractCode(message.caller)
+      if (code.length === 0) {
+        await this._state.putContractCode(
+          message.caller,
+          fromHexString(this._vm.contracts.mockOVM_ECDSAContractAccount.code)
+        )
+      }
+
       message = message.toOvmMessage(this._vm, this._block || new Block())
     }
 
@@ -134,7 +144,57 @@ export default class EVM {
 
     let result
     if (message.to) {
-      if (message.to.equals(this._vm.contracts.ovmStateManager.address)) {
+      const code = await this._state.getContractCode(message.to)
+      const isECDSAContractAccount = toHexString(code) === this._vm.contracts.mockOVM_ECDSAContractAccount.code
+      const target = isECDSAContractAccount ? this._vm.getContractByName('mockOVM_ECDSAContractAccount') : this._vm.getContract(message.to)
+
+      if (target) {
+        let methodId = '0x' + message.data.slice(0, 4).toString('hex')
+
+        let fragment: any
+        try {
+          fragment = target.iface.getFunction(methodId)
+        } catch (err) {
+          console.error(`\nCaught decoding error for ${target.name} with data: ${toHexString(message.data)}, ${err}`)
+          console.error(`Attempting to try again with function parameters removed in sighash calculation.`)
+
+          let correctedMethodId: string | undefined
+          for (const functionName of Object.keys(target.iface.functions)) {
+            const possibleMethodId = ethers.utils.id(functionName.split('(')[0] + '()').slice(0, 10)
+            if (possibleMethodId === methodId) {
+              correctedMethodId = ethers.utils.id(functionName).slice(0, 10)
+              break
+            }
+          }
+
+          if (!correctedMethodId) {
+            console.error(`Cannot find a suitable function match, throwing.`)
+            throw err
+          }
+
+          try {
+            fragment = target.iface.getFunction(correctedMethodId)
+            methodId = correctedMethodId
+            console.log(`Found a suitable function match: ${target.name}.${fragment.name}, continuing.`)
+          } catch (err) {
+            console.error(`Second decoding attempt failed for ${target.name} with data: ${toHexString(message.data)}, ${err}`)
+            throw err
+          }
+        }
+
+        message.data = Buffer.concat([
+          fromHexString(methodId),
+          message.data.slice(4)
+        ])
+
+        const functionArgs = target.iface.decodeFunctionData(fragment, toHexString(message.data))
+
+        console.log(`\nCalling ${target.name}.${fragment.name} with args: ${functionArgs}`)
+      } else {
+        console.log(`Calling unknown contract (${toHexString(message.to)}) with data: ${toHexString(message.data)}`)
+      }
+
+      if (target && target.name === 'OVM_StateManager') {
         result = {
           gasUsed: new BN(0),
           execResult: {
@@ -148,6 +208,7 @@ export default class EVM {
     } else {
       result = await this._executeCreate(message)
     }
+
     // TODO: Move `gasRefund` to a tx-level result object
     // instead of `ExecResult`.
     result.execResult.gasRefund = this._refund.clone()
@@ -160,7 +221,7 @@ export default class EVM {
       if (this._targetMessageResult) {
         if (result.execResult.logs) {
           result.execResult.logs = result.execResult.logs.filter(log => {
-            return !log[0].equals(this._vm.contracts.ovmExecutionManager.address)
+            return !log[0].equals(this._vm.contracts.OVM_ExecutionManager.address)
           })
         }
 
@@ -285,7 +346,8 @@ export default class EVM {
     }
 
     // Exit early if there's no contract code or value transfer overflowed
-    if (!message.code || message.code.length === 0 || errorMessage) {
+    if (!message.code || message.code.length === 0) {
+      console.error(`Could not load code for: ${toHexString(message.to)}`)
       return {
         gasUsed: new BN(0),
         createdAddress: message.to,
@@ -441,8 +503,8 @@ export default class EVM {
     return fromHexString(
       toHexAddress(
         await this._vm.pStateManager.getContractStorage(
-          this._vm.contracts.ovmExecutionManager.address,
-          Buffer.from('00'.repeat(31) + '06', 'hex'),
+          this._vm.contracts.OVM_ExecutionManager.address,
+          Buffer.from('00'.repeat(31) + '0f', 'hex'),
         ),
       ),
     )
