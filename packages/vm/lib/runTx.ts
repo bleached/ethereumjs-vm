@@ -85,7 +85,6 @@ export default async function runTx(this: VM, opts: RunTxOpts): Promise<RunTxRes
 }
 
 async function _runTx(this: VM, opts: RunTxOpts): Promise<RunTxResult> {
-  console.log('in custom')
   // Skip these checks because we don't have these concepts in the OVM.
   opts.skipBalance = true
   opts.skipNonce = true
@@ -147,9 +146,7 @@ async function _runTx(this: VM, opts: RunTxOpts): Promise<RunTxResult> {
   })
   const evm = new EVM(this, txContext, block)
 
-  console.log('---------- BEGIN TRANSACTION TRACE ----------')
   const results = (await evm.executeMessage(message)) as RunTxResult
-  console.log('----------  END TRANSACTION TRACE  ----------')
 
   /*
    * Parse results
