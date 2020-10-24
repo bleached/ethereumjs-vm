@@ -266,7 +266,7 @@ export default class Interpreter {
       const memSizeLogger = new Logger(callLogger.namespace + ':memorysize')
       const gasLogger = new Logger(callLogger.namespace + ':steps')
 
-      callLogger.open(`${description} ${contractName} at depth ${step.depth}`)
+      stepLogger.open(`${description} ${contractName} at depth ${step.depth}`)
 
       this._loggers[step.depth] = {
         callLogger,
@@ -291,17 +291,14 @@ export default class Interpreter {
       const length = stack[1].toNumber()
       const data = Buffer.from(memory.slice(offset, offset + length))
 
+      loggers.stepLogger.close()
       loggers.callLogger.log(`${op} with data: ${toHexString(data)}`)
-      loggers.callLogger.close()
       delete this._loggers[step.depth]
     } else if (op === 'CALL') {
       const target = stack[1].toBuffer()
       const offset = stack[3].toNumber()
       const length = stack[4].toNumber()
-
       const calldata = Buffer.from(memory.slice(offset, offset + length))
-
-
 
       const code = await this._state.getContractCode(target)
       const isECDSAContractAccount =
@@ -359,7 +356,7 @@ export default class Interpreter {
           .map((el, idx) => {
             return ` ${idx}: ${toHexString(el)}`
           })
-          .join('')}]\n`,
+          .join('')}]`,
       )
 
       if (
