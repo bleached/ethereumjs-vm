@@ -231,6 +231,14 @@ export default class EVM {
     // instead of `ExecResult`.
     result.execResult.gasRefund = this._refund.clone()
 
+    const err = result.execResult.exceptionError
+    if (err) {
+      result.execResult.logs = []
+      await this._state.revert()
+    } else {
+      await this._state.commit()
+    }
+
     if (isTargetMessage) {
       this._targetMessageResult = result
     }
@@ -261,12 +269,9 @@ export default class EVM {
 
         const EOAReturnedFalse = this._accountMessageResult?.execResult.returnValue.slice(0,32).toString('hex') == '00'.repeat(32)
         wasDeployException = EOAReturnedFalse && !this._targetMessageResult.execResult.exceptionError 
-        console.log(`detected deploy exception?: ${wasDeployException}`)
         const exceptionError = wasDeployException
           ? new VmError(ERROR.REVERT) 
           : this._targetMessageResult.execResult.exceptionError
-
-        console.log(`exception error is: ${JSON.stringify(exceptionError)}`)
 
         result = {
           ...result,
@@ -281,14 +286,6 @@ export default class EVM {
         // todo: break out error cases and surface here
         result.execResult.exceptionError = new VmError(ERROR.OVM_ERROR)
       }
-    }
-
-    const err = result.execResult.exceptionError
-    if (err && !wasDeployException) {
-      result.execResult.logs = []
-      await this._state.revert()
-    } else {
-      await this._state.commit()
     }
 
     if (
