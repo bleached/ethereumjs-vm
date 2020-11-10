@@ -194,19 +194,19 @@ export default class EVM {
 
         // OVM reverts have some flag-related metadata before the revert data--strip this out for providers etc.
         let returnData: Buffer = this._targetMessageResult.execResult.returnValue
-        if (
-          !!this._targetMessageResult.execResult.exceptionError
-          && returnData.byteLength >= 160
-        ) {
+        if (!!this._targetMessageResult.execResult.exceptionError && returnData.byteLength >= 160) {
           returnData = returnData.slice(160)
         }
 
         result.execResult.exceptionError
 
-        const EOAReturnedFalse = this._accountMessageResult?.execResult.returnValue.slice(0,32).toString('hex') == '00'.repeat(32)
-        wasDeployException = EOAReturnedFalse && !this._targetMessageResult.execResult.exceptionError 
+        const EOAReturnedFalse =
+          this._accountMessageResult?.execResult.returnValue.slice(0, 32).toString('hex') ==
+          '00'.repeat(32)
+        wasDeployException =
+          EOAReturnedFalse && !this._targetMessageResult.execResult.exceptionError
         const exceptionError = wasDeployException
-          ? new VmError(ERROR.REVERT) 
+          ? new VmError(ERROR.REVERT)
           : this._targetMessageResult.execResult.exceptionError
 
         result = {
@@ -215,7 +215,7 @@ export default class EVM {
           execResult: {
             ...result.execResult,
             returnValue: returnData,
-            exceptionError
+            exceptionError,
           },
         }
       } else {
@@ -225,9 +225,9 @@ export default class EVM {
     }
 
     if (
-      message.depth == 1
-      && message.to.toString() != this._vm.contracts.OVM_StateManager.address.toString()
-    ) { 
+      message.depth == 1 &&
+      message.to.toString() != this._vm.contracts.OVM_StateManager.address.toString()
+    ) {
       this._accountMessageResult = result
     }
 
