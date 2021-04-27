@@ -21,7 +21,6 @@ This is a maintenance release preceding the v5.
 
 - Properly copying BigNumbers on stack.
   PR [#733](https://github.com/ethereumjs/ethereumjs-vm/pull/733)
-
 - Fixes installation on Node 12, by bumping `level` dependency from `^4.0.0` to `^6.0.0`
   PR [#662](https://github.com/ethereumjs/ethereumjs-vm/pull/662)
 
