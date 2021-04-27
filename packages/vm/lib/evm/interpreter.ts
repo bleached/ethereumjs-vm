@@ -9,6 +9,13 @@ import EEI from './eei'
 import { Opcode } from './opcodes'
 import { handlers as opHandlers, OpHandler } from './opFns'
 
+import { Logger } from '../ovm/utils/logger'
+import { env } from 'process'
+import { toHexAddress, toHexString } from '../ovm/utils/buffer-utils'
+import { info } from 'console'
+
+const logger = new Logger('js-ovm:intrp')
+
 export interface InterpreterOpts {
   pc?: number
 }
@@ -58,6 +65,18 @@ export default class Interpreter {
   _state: StateManager
   _runState: RunState
   _eei: EEI
+  _printNextMemory: boolean = false
+  _loggers: {
+    [depth: number]: {
+      callLogger: Logger
+      stepLogger: Logger
+      memLogger: Logger
+      memSizeLogger: Logger
+      gasLogger: Logger
+    }
+  }
+  _firstStep: boolean
+  _initialGas: BN
 
   constructor(vm: any, eei: EEI) {
     this._vm = vm // TODO: remove when not needed
@@ -77,6 +96,10 @@ export default class Interpreter {
       stateManager: this._state,
       eei: this._eei,
     }
+
+    this._loggers = {}
+    this._firstStep = true
+    this._initialGas = new BN(0)
   }
 
   async run(code: Buffer, opts: InterpreterOpts = {}): Promise<InterpreterResult> {
@@ -175,6 +198,13 @@ export default class Interpreter {
       memoryWordCount: this._runState.memoryWordCount,
       codeAddress: this._eei._env.codeAddress,
     }
+
+    try {
+      await this._logStep(eventObj)
+    } catch (err) {
+      logger.log(`STEP LOGGING ERROR: ${err.toString()}`)
+    }
+
     /**
      * The `step` event for trace output
      *
@@ -212,5 +242,136 @@ export default class Interpreter {
     }
 
     return jumps
+  }
+
+  async _logStep(step: InterpreterStep): Promise<void> {
+    if (env.DEBUG_OVM != 'true') {
+      return
+    }
+
+    if (this._firstStep && step.depth == 0) {
+      this._initialGas = step.gasLeft
+      this._firstStep = false
+    }
+
+    const isEntryPoint = step.depth === 0
+
+    if (!(step.depth in this._loggers)) {
+      const contractName = this._vm.getContract(step.address)
+      const description = isEntryPoint ? 'OVM TX starts with' : 'EVM STEPS for'
+
+      const addressStart = step.address.slice(0, 3).toString('hex')
+      const addressEnd = step.address.slice(step.address.length - 3).toString('hex')
+      const callLogger = new Logger(
+        logger.namespace + ':0x' + addressStart + '..' + addressEnd + ':d' + step.depth + ':calls',
+      )
+      const stepLogger = new Logger(callLogger.namespace + ':steps')
+      const memLogger = new Logger(callLogger.namespace + ':memory')
+      const memSizeLogger = new Logger(callLogger.namespace + ':memorysize')
+      const gasLogger = new Logger(callLogger.namespace + ':steps')
+
+      if (isEntryPoint) {
+        callLogger.open(`${description} ${contractName} at depth ${step.depth}`)
+      } else {
+        stepLogger.open(`${description} ${contractName} at depth ${step.depth}`)
+      }
+
+      this._loggers[step.depth] = {
+        callLogger,
+        stepLogger,
+        memLogger,
+        gasLogger,
+        memSizeLogger,
+      }
+    }
+
+    const loggers = this._loggers[step.depth]
+    const stack = new Array(...step.stack).reverse()
+    const memory = step.memory
+    const op = step.opcode.name
+
+    if (['RETURN', 'REVERT', 'STOP', 'INVALID'].includes(op)) {
+      if (step.depth === 0) {
+        loggers.gasLogger.log(
+          `OVM tx completed having used ${this._initialGas.sub(step.gasLeft).toString()} gas.`,
+        )
+      }
+
+      if (['RETURN', 'REVERT'].includes(op)) {
+        const offset = stack[0].toNumber()
+        const length = stack[1].toNumber()
+        const data = Buffer.from(memory.slice(offset, offset + length))
+        loggers.callLogger.log(`${op} with data: ${toHexString(data)}`)
+      } else {
+        loggers.callLogger.log(op)
+      }
+
+      if (isEntryPoint) {
+        loggers.callLogger.close()
+      } else {
+        loggers.stepLogger.close()
+      }
+
+      delete this._loggers[step.depth]
+    } else if (op === 'CALL') {
+      const target = stack[1].toBuffer()
+      const offset = stack[3].toNumber()
+      const length = stack[4].toNumber()
+      const calldata = Buffer.from(memory.slice(offset, offset + length))
+
+      const code = await this._state.getContractCode(target)
+      const isECDSAContractAccount =
+        toHexString(code) === this._vm.contracts.mockOVM_ECDSAContractAccount.code
+      const targetContract = isECDSAContractAccount
+        ? this._vm.getContractByName('mockOVM_ECDSAContractAccount')
+        : this._vm.getContract(target)
+
+      if (targetContract) {
+        let methodId = '0x' + calldata.slice(0, 4).toString('hex')
+        let fragment = targetContract.iface.getFunction(methodId)
+
+        let logString
+        try {
+          const decodedArgs = targetContract.iface.decodeFunctionData(
+            fragment,
+            toHexString(calldata),
+          )
+          logString = `CALL to ${targetContract.name}.${fragment.name} with args: ${decodedArgs}`
+        } catch {
+          logString = `CALL to ${targetContract.name}.${
+            fragment.name
+          } with raw data (failed to decode): 0x${calldata.toString('hex')}`
+        }
+
+        loggers.callLogger.log(logString)
+      } else {
+        loggers.callLogger.log(
+          `CALL to unknown contract (${toHexString(target)}) with data: ${toHexString(calldata)}`,
+        )
+      }
+    } else {
+      loggers.stepLogger.log(
+        `opcode: ${op.padEnd(10, ' ')}  pc: ${step.pc
+          .toString()
+          .padEnd(10, ' ')} gasLeft: ${step.gasLeft.toString()}\nstack: [${stack
+          .map((el, idx) => {
+            return ` ${idx}: ${toHexString(el)}`
+          })
+          .join('')}]`,
+      )
+
+      if (
+        this._printNextMemory ||
+        ['CALL', 'CREATE', 'CREATE2', 'STATICCALL', 'DELEGATECALL'].includes(op)
+      ) {
+        const memsize = memory.length
+        if (memsize > 20000) {
+          loggers.memSizeLogger.log(`MSIZE of ${memsize} in memory modifying step.`)
+        }
+        loggers.memLogger.log(`$[${toHexString(Buffer.from(memory))}]`)
+      }
+
+      this._printNextMemory = ['MSTORE', 'CALLDATACOPY', 'RETURNDATACOPY', 'CODECOPY'].includes(op)
+    }
   }
 }

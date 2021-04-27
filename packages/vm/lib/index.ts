@@ -12,8 +12,41 @@ import { EVMResult, ExecResult } from './evm/evm'
 import { OpcodeList, getOpcodesForHF } from './evm/opcodes'
 import { precompiles } from './evm/precompiles'
 import runBlockchain from './runBlockchain'
+
+import PStateManager from './state/promisified'
+import { OvmStateManager } from './ovm/ovm-state-manager'
+const promisify = require('util.promisify')
 const AsyncEventEmitter = require('async-eventemitter')
 const promisify = require('util.promisify')
+
+// Custom imports
+import { Interface } from '@ethersproject/abi'
+import { fromHexString } from './ovm/utils/buffer-utils'
+import { BigNumber } from 'ethers'
+
+interface OVMContract {
+  name: string
+  address: Buffer
+  addressHex: string
+  code: string
+  iface: any
+}
+
+interface StorageDump {
+  [key: string]: string
+}
+
+interface StateDump {
+  accounts: {
+    [name: string]: {
+      address: string
+      code: string
+      codeHash: string
+      storage: StorageDump
+      abi: any
+    }
+  }
+}
 
 /**
  * Options for instantiating a [[VM]].
@@ -56,6 +89,15 @@ export interface VMOpts {
    */
   allowUnlimitedContractSize?: boolean
   common?: Common
+
+  ovmOpts?: {
+    initialized?: boolean
+    emGasLimit?: number
+    dump?: StateDump
+    contracts?: {
+      [name: string]: OVMContract
+    }
+  }
 }
 
 /**
@@ -83,6 +125,15 @@ export default class VM extends AsyncEventEmitter {
     const vm = new this(opts)
     await vm.init()
     return vm
+  }
+
+  // Custom variables
+  emGasLimit: number
+  initialized: boolean
+  dump: StateDump | undefined
+  ovmStateManager: OvmStateManager
+  contracts: {
+    [name: string]: OVMContract
   }
 
   /**
@@ -137,37 +188,97 @@ export default class VM extends AsyncEventEmitter {
     this.allowUnlimitedContractSize =
       opts.allowUnlimitedContractSize === undefined ? false : opts.allowUnlimitedContractSize
 
+    // OVM option setup.
+    const ovmOpts = opts.ovmOpts || {}
+    this.emGasLimit = ovmOpts.emGasLimit || 100_000_000
+    this.dump = ovmOpts.dump
+    this.initialized = ovmOpts.initialized || false
+
+    if (ovmOpts.contracts) {
+      this.contracts = ovmOpts.contracts
+    } else {
+      if (!this.dump) {
+        throw new Error('You must provide a state dump to initialize the OVM.')
+      }
+
+      this.contracts = {}
+      for (const [name, account] of Object.entries(this.dump.accounts)) {
+        this.contracts[name] = {
+          name,
+          address: fromHexString(account.address),
+          addressHex: account.address,
+          code: account.code,
+          iface: new Interface(account.abi),
+        }
+      }
+    }
+
+    // Always need an instance of this.
+    this.ovmStateManager = new OvmStateManager({
+      vm: this,
+    })
+
     // We cache this promisified function as it's called from the main execution loop, and
     // promisifying each time has a huge performance impact.
-    this._emit = promisify(this.emit.bind(this))
+    const emit = promisify(this.emit.bind(this))
+    this._emit = async (topic: string, data: any): Promise<void> => {
+      if (data) {
+        const addresses = [data.address, data.to]
+        for (const address of addresses) {
+          if (address) {
+            const addr = address.toString('hex')
+            if (addr.startsWith('deaddeaddead')) {
+              return
+            }
+          }
+        }
+      }
+
+      emit(topic, data)
+    }
   }
 
   async init(): Promise<void> {
-    if (this.isInitialized) {
+    if (this.initialized) {
       return
     }
 
-    const { opts } = this
-
-    if (opts.activatePrecompiles && !opts.stateManager) {
-      this.stateManager.checkpoint()
-      // put 1 wei in each of the precompiles in order to make the accounts non-empty and thus not have them deduct `callNewAccount` gas.
-      await Promise.all(
-        Object.keys(precompiles)
-          .map((k: string): Buffer => Buffer.from(k, 'hex'))
-          .map((address: Buffer) =>
-            this.stateManager.putAccount(
-              address,
-              new Account({
-                balance: '0x01',
-              }),
-            ),
-          ),
-      )
-      await this.stateManager.commit()
+    if (!this.dump) {
+      throw new Error('You must provide a state dump to initialize the OVM.')
     }
 
-    this.isInitialized = true
+    this.initialized = true
+
+    for (const account of Object.values(this.dump.accounts)) {
+      await this.pStateManager.putAccount(fromHexString(account.address), new Account())
+
+      await this.pStateManager.putContractCode(
+        fromHexString(account.address),
+        fromHexString(account.code),
+      )
+
+      for (const [key, val] of Object.entries(account.storage)) {
+        await this.pStateManager.putContractStorage(
+          fromHexString(account.address),
+          fromHexString(key),
+          fromHexString(val),
+        )
+      }
+    }
+
+    // Set maxTransactionGasLimit
+    await this.pStateManager.putContractStorage(
+      fromHexString('0xdeaddeaddeaddeaddeaddeaddeaddeaddead0005'),
+      fromHexString('0x0000000000000000000000000000000000000000000000000000000000000004'),
+      fromHexString(BigNumber.from(this.emGasLimit).toHexString()),
+    )
+
+    // Set maxGasPerQueuePerEpoch
+    await this.pStateManager.putContractStorage(
+      fromHexString('0xdeaddeaddeaddeaddeaddeaddeaddeaddead0005'),
+      fromHexString('0x0000000000000000000000000000000000000000000000000000000000000005'),
+      fromHexString(BigNumber.from(this.emGasLimit).toHexString()),
+    )
   }
 
   /**
@@ -237,6 +348,19 @@ export default class VM extends AsyncEventEmitter {
       stateManager: this.stateManager.copy(),
       blockchain: this.blockchain,
       common: this._common,
+      ovmOpts: this.opts.ovmOpts,
+    })
+  }
+
+  getContract(address: Buffer): OVMContract | undefined {
+    return Object.values(this.contracts).find(contract => {
+      return contract.address.equals(address)
+    })
+  }
+
+  getContractByName(name: string): OVMContract | undefined {
+    return Object.values(this.contracts).find(contract => {
+      return contract.name === name
     })
   }
 }

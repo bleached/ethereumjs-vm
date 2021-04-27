@@ -73,14 +73,14 @@ Produces `dist` files for all sub-packages. This command can be scoped
 
 #### `npm run build:tree -- --scope @ethereumjs/blockchain`
 
-Builds all local packages that the provided package (eg: @ethereumjs/blockchain) depends on, and itself. This unusual syntax just means: pass whatever arguments are after `--` to the underlying script. 
+Builds all local packages that the provided package (eg: @ethereumjs/blockchain) depends on, and itself. This unusual syntax just means: pass whatever arguments are after `--` to the underlying script.
 
 If no scope is provided, `npm run build:tree`, will build all sub-packages.
 
 ### Package scripts — run from `./packages/<name>`
 
  **⚠️ Important: if you run `npm install` from the package directory, it will remove all links to the local packages, pulling all dependencies from npm. Run `npm install` from the root only.**
- 
+
 There's a set of rather standardized commands you will find in each package of this repository.
 
 #### `npm run build`
@@ -101,7 +101,7 @@ Checks code style, according to the rules defined in [ethereumjs-config](https:/
 
 #### `npm run lint:fix`
 
-Fixes code style, according to the rules 
+Fixes code style, according to the rules
 
 #### `npm run test`
 

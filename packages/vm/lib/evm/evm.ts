@@ -16,6 +16,9 @@ import TxContext from './txContext'
 import Message from './message'
 import EEI from './eei'
 import { default as Interpreter, InterpreterOpts, RunState } from './interpreter'
+import { fromHexString, toHexAddress, toHexString } from '../ovm/utils/buffer-utils'
+import { Interface } from 'ethers/lib/utils'
+import { ethers } from 'ethers'
 
 /**
  * Result of executing a message via the [[EVM]].
@@ -100,6 +103,11 @@ export default class EVM {
    */
   _refund: BN
 
+  // Custom variables
+  _targetMessage: Message | undefined
+  _targetMessageResult: EVMResult | undefined
+  _accountMessageResult: EVMResult | undefined
+
   constructor(vm: any, txContext: TxContext, block: any) {
     this._vm = vm
     this._state = this._vm.stateManager
@@ -118,12 +126,47 @@ export default class EVM {
 
     await this._state.checkpoint()
 
+    if (message.depth === 0) {
+      const code = await this._state.getContractCode(message.caller)
+      if (code.length === 0) {
+        await this._state.putContractCode(
+          message.caller,
+          fromHexString(this._vm.contracts.mockOVM_ECDSAContractAccount.code),
+        )
+      }
+
+      message = message.toOvmMessage(this._vm, this._block || new Block())
+    }
+
+    let isTargetMessage = !this._targetMessage && message.isTargetMessage()
+    if (isTargetMessage) {
+      this._targetMessage = message
+    }
+
     let result
     if (message.to) {
-      result = await this._executeCall(message)
+      const code = await this._state.getContractCode(message.to)
+      const isECDSAContractAccount =
+        toHexString(code) === this._vm.contracts.mockOVM_ECDSAContractAccount.code
+      const target = isECDSAContractAccount
+        ? this._vm.getContractByName('mockOVM_ECDSAContractAccount')
+        : this._vm.getContract(message.to)
+
+      if (target && target.name === 'OVM_StateManager') {
+        result = {
+          gasUsed: new BN(0),
+          execResult: {
+            gasUsed: new BN(0),
+            returnValue: await this._vm.ovmStateManager.handleCall(message, this._tx),
+          },
+        } as EVMResult
+      } else {
+        result = await this._executeCall(message)
+      }
     } else {
       result = await this._executeCreate(message)
     }
+
     // TODO: Move `gasRefund` to a tx-level result object
     // instead of `ExecResult`.
     result.execResult.gasRefund = this._refund.clone()
@@ -134,6 +177,58 @@ export default class EVM {
       await this._state.revert()
     } else {
       await this._state.commit()
+    }
+
+    if (isTargetMessage) {
+      this._targetMessageResult = result
+    }
+
+    let wasDeployException = false
+    if (message.depth === 0) {
+      if (this._targetMessageResult) {
+        if (result.execResult.logs) {
+          result.execResult.logs = result.execResult.logs.filter(log => {
+            return !log[0].equals(this._vm.contracts.OVM_ExecutionManager.address)
+          })
+        }
+
+        // OVM reverts have some flag-related metadata before the revert data--strip this out for providers etc.
+        let returnData: Buffer = this._targetMessageResult.execResult.returnValue
+        if (!!this._targetMessageResult.execResult.exceptionError && returnData.byteLength >= 160) {
+          returnData = returnData.slice(160)
+        }
+
+        result.execResult.exceptionError
+
+        const EOAReturnedFalse =
+          this._accountMessageResult?.execResult.returnValue.slice(0, 32).toString('hex') ==
+          '00'.repeat(32)
+        wasDeployException =
+          EOAReturnedFalse && !this._targetMessageResult.execResult.exceptionError
+        const exceptionError = wasDeployException
+          ? new VmError(ERROR.REVERT)
+          : this._targetMessageResult.execResult.exceptionError
+
+        result = {
+          ...result,
+          createdAddress: this._targetMessageResult.createdAddress,
+          execResult: {
+            ...result.execResult,
+            returnValue: returnData,
+            exceptionError,
+          },
+        }
+      } else {
+        // todo: detect OVM-specific error cases and surface here
+        result.execResult.exceptionError = new VmError(ERROR.OVM_ERROR)
+      }
+    }
+
+    if (
+      message.depth == 1 &&
+      message.to.toString() != this._vm.contracts.OVM_StateManager.address.toString()
+    ) {
+      this._accountMessageResult = result
     }
 
     await this._vm._emit('afterMessage', result)
@@ -235,7 +330,8 @@ export default class EVM {
     }
 
     // Exit early if there's no contract code or value transfer overflowed
-    if (!message.code || message.code.length === 0 || errorMessage) {
+    if (!message.code || message.code.length === 0) {
+      console.error(`Could not load code for: ${toHexString(message.to)}`)
       return {
         gasUsed: new BN(0),
         createdAddress: message.to,
@@ -307,6 +403,7 @@ export default class EVM {
       block: this._block || new Block(),
       contract: await this._state.getAccount(message.to || zeros(32)),
       codeAddress: message.codeAddress,
+      originalTargetAddress: message.originalTargetAddress,
     }
     const eei = new EEI(env, this._state, this, this._vm._common, message.gasLimit.clone())
     if (message.selfdestruct) {
@@ -387,15 +484,14 @@ export default class EVM {
   }
 
   async _generateAddress(message: Message): Promise<Buffer> {
-    let addr
-    if (message.salt) {
-      addr = generateAddress2(message.caller, message.salt, message.code as Buffer)
-    } else {
-      const acc = await this._state.getAccount(message.caller)
-      const newNonce = new BN(acc.nonce).subn(1)
-      addr = generateAddress(message.caller, newNonce.toArrayLike(Buffer))
-    }
-    return addr
+    return fromHexString(
+      toHexAddress(
+        await this._state.getContractStorage(
+          this._vm.contracts.OVM_ExecutionManager.address,
+          Buffer.from('00'.repeat(31) + '0f', 'hex'),
+        ),
+      ),
+    )
   }
 
   async _reduceSenderBalance(account: Account, message: Message): Promise<void> {

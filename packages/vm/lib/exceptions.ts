@@ -12,6 +12,9 @@ export enum ERROR {
   STOP = 'stop',
   REFUND_EXHAUSTED = 'refund exhausted',
   VALUE_OVERFLOW = 'value overflow',
+
+  // Custom variables
+  OVM_ERROR = 'target contract not reached',
 }
 
 export class VmError {
